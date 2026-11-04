@@ -57,10 +57,7 @@ public class Polydex2REIPlugin implements REIClientPlugin {
         });
 
         for (ClientPolymerItem clientPolymerItem : ClientPolymerItem.REGISTRY) {
-            Item item = clientPolymerItem.registryEntry();
-            if (item == null) {
-                continue;
-            }
+            // Server-only items have no local registry entry; Polymer syncs their visual stacks.
             ItemStack clientItemStack = clientPolymerItem.visualStack().copy();
             EntryStack<ItemStack> entryStack = EntryStack.of(VanillaEntryTypes.ITEM, clientItemStack);
             registry.addEntry(entryStack);

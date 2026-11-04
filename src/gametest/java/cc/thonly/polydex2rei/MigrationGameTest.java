@@ -14,6 +14,8 @@ import dev.architectury.event.CompoundEventResult;
 import dev.architectury.event.events.client.ClientGuiEvent;
 import eu.pb4.polydex.impl.PolydexImpl;
 import eu.pb4.polydex.api.v1.recipe.PolydexPageUtils;
+import eu.pb4.polymer.core.api.client.ClientPolymerItem;
+import eu.pb4.polymer.core.impl.client.InternalClientRegistry;
 import io.netty.buffer.Unpooled;
 import me.shedaniel.rei.api.client.registry.entry.EntryRegistry;
 import me.shedaniel.rei.api.client.registry.screen.ScreenRegistry;
@@ -137,6 +139,7 @@ public class MigrationGameTest implements FabricClientGameTest {
                     && DisplayRegistry.getInstance().getAll().values().stream()
                     .flatMap(java.util.Collection::stream).anyMatch(MigrationGameTest::makesDiamondChestplate));
             context.runOnClient(client -> {
+                verifyServerOnlyItemRegistration();
                 EntryStack<?> chestplate = EntryRegistry.getInstance().getEntryStacks()
                         .filter(entry -> entry.getValue() instanceof ItemStack item && item.is(Items.DIAMOND_CHESTPLATE))
                         .findFirst().orElseThrow();
@@ -327,6 +330,44 @@ public class MigrationGameTest implements FabricClientGameTest {
                 context.runOnClient(client -> client.player.closeContainer());
             }
             context.setScreen(() -> null);
+        }
+    }
+
+    private static void verifyServerOnlyItemRegistration() {
+        // Polymer sends a visual stack even when the content mod is absent locally.
+        Identifier id = Identifier.parse("polydex2rei_test:server_only_item");
+        require(!BuiltInRegistries.ITEM.containsKey(id), "Server-only fixture exists locally");
+        ItemStack visual = new ItemStack(Items.STONE);
+        CompoundTag identity = new CompoundTag();
+        identity.putString("id", id.toString());
+        CompoundTag custom = new CompoundTag();
+        custom.put(ClientPolymerItemUtils.POLYMER_ID, identity);
+        visual.set(DataComponents.CUSTOM_DATA, CustomData.of(custom));
+        var item = new ClientPolymerItem(id, visual, null);
+        var added = new java.util.ArrayList<EntryStack<?>>();
+        // Capture registration without changing REI's live registry outside a reload.
+        var registry = (EntryRegistry) java.lang.reflect.Proxy.newProxyInstance(
+                EntryRegistry.class.getClassLoader(), new Class<?>[]{EntryRegistry.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("removeEntryIf")) return false;
+                    if (method.getName().equals("addEntry")) {
+                        added.add((EntryStack<?>) args[0]);
+                        return null;
+                    }
+                    throw new AssertionError("Unexpected registry call: " + method);
+                });
+        InternalClientRegistry.ITEMS.set(id, item);
+        try {
+            new Polydex2REIPlugin().registerEntries(registry);
+            var entry = added.stream().filter(candidate -> candidate.getValue() instanceof ItemStack stack
+                            && ClientPolymerItemUtils.getRealItemId(stack).equals(id.toString()))
+                    .findFirst().orElseThrow(() -> new AssertionError("REI skipped server-only Polymer item"));
+            require(entry.getValue() != visual && ItemStack.isSameItemSameComponents((ItemStack) entry.getValue(), visual),
+                    "REI must copy the synced visual stack and preserve its identity");
+            require(entry.getIdentifier().equals(id), "Server-only entry lost its searchable mod ID");
+            require(!EntryStacks.equalsFuzzy(entry, EntryStacks.of(Items.STONE)),
+                    "Server-only entry matches its vanilla carrier");
+        } finally {
+            InternalClientRegistry.ITEMS.remove(item);
         }
     }
 
