@@ -1,46 +1,45 @@
 package cc.thonly.polydex2rei.util;
 
 import eu.pb4.polymer.core.api.item.PolymerItemUtils;
-import net.minecraft.component.ComponentType;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.NbtComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-
 import java.util.Optional;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.CustomData;
 
 public class ClientPolymerItemUtils {
     public static final String POLYMER_ID = PolymerItemUtils.POLYMER_STACK;
     public static final String REI_ITEM_ID = "$rei_item_id";
     public static final String POLY_MC_ID = "PolyMcOriginal";
-    public static final String DEFAULT_ITEM_ID = Identifier.ofVanilla("stone").toString();
+    public static final String DEFAULT_ITEM_ID = Identifier.withDefaultNamespace("stone").toString();
 
     public static ItemStack parseToEiv(ItemStack itemStack) {
         ItemStack result = new ItemStack(Items.TRIAL_KEY);
-        applyIfPresent(result, itemStack, DataComponentTypes.ITEM_NAME);
-        applyIfPresent(result, itemStack, DataComponentTypes.CUSTOM_NAME);
-        applyIfPresent(result, itemStack, DataComponentTypes.ITEM_MODEL);
-        applyIfPresent(result, itemStack, DataComponentTypes.CUSTOM_MODEL_DATA);
-        applyIfPresent(result, itemStack, DataComponentTypes.DYED_COLOR);
-        NbtComponent nbtComponent = itemStack.get(DataComponentTypes.CUSTOM_DATA);
+        applyIfPresent(result, itemStack, DataComponents.ITEM_NAME);
+        applyIfPresent(result, itemStack, DataComponents.CUSTOM_NAME);
+        applyIfPresent(result, itemStack, DataComponents.ITEM_MODEL);
+        applyIfPresent(result, itemStack, DataComponents.CUSTOM_MODEL_DATA);
+        applyIfPresent(result, itemStack, DataComponents.DYED_COLOR);
+        CustomData nbtComponent = itemStack.get(DataComponents.CUSTOM_DATA);
         if (nbtComponent != null) {
             Optional<String> polymerStackId = getPolymerStackId(itemStack);
             if (polymerStackId.isPresent()) {
-                NbtCompound nbtCompound = new NbtCompound();
+                CompoundTag nbtCompound = new CompoundTag();
                 nbtCompound.putString(REI_ITEM_ID, polymerStackId.get());
-                NbtComponent nbtCompoundResult = NbtComponent.of(nbtCompound);
-                result.set(DataComponentTypes.CUSTOM_DATA, nbtCompoundResult);
+                CustomData nbtCompoundResult = CustomData.of(nbtCompound);
+                result.set(DataComponents.CUSTOM_DATA, nbtCompoundResult);
             }
         }
         return result;
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
-    public static void applyIfPresent(ItemStack target, ItemStack source, ComponentType componentType) {
+    public static void applyIfPresent(ItemStack target, ItemStack source, DataComponentType componentType) {
         if (source.get(componentType) != null) {
             target.set(componentType, source.get(componentType));
         }
@@ -74,11 +73,11 @@ public class ClientPolymerItemUtils {
         if (itemStack.getItem() == Items.AIR) {
             return DEFAULT_ITEM_ID;
         }
-        return Registries.ITEM.getId(itemStack.getItem()).toString();
+        return BuiltInRegistries.ITEM.getKey(itemStack.getItem()).toString();
     }
 
     public static Optional<String> getItemModelId(ItemStack itemStack) {
-        Identifier modelId = itemStack.get(DataComponentTypes.ITEM_MODEL);
+        Identifier modelId = itemStack.get(DataComponents.ITEM_MODEL);
         if (modelId==null) {
             return Optional.empty();
         }
@@ -86,13 +85,13 @@ public class ClientPolymerItemUtils {
     }
 
     public static Optional<String> getPolymerStackId(ItemStack itemStack) {
-        NbtComponent customData = getCustomData(itemStack);
+        CustomData customData = getCustomData(itemStack);
         if (customData == null) {
             return Optional.empty();
         }
-        NbtCompound nbtCompound = customData.copyNbt();
-        NbtElement element = nbtCompound.get(POLYMER_ID);
-        if (!(element instanceof NbtCompound polymerStack)) {
+        CompoundTag nbtCompound = customData.copyTag();
+        Tag element = nbtCompound.get(POLYMER_ID);
+        if (!(element instanceof CompoundTag polymerStack)) {
             return Optional.empty();
         }
         if (polymerStack.contains("id")) {
@@ -102,13 +101,13 @@ public class ClientPolymerItemUtils {
     }
 
     public static Optional<String> getPolyMcStackId(ItemStack itemStack) {
-        NbtComponent customData = getCustomData(itemStack);
+        CustomData customData = getCustomData(itemStack);
         if (customData == null) {
             return Optional.empty();
         }
-        NbtCompound nbtCompound = customData.copyNbt();
-        NbtElement element = nbtCompound.get(POLY_MC_ID);
-        if (!(element instanceof NbtCompound polymerStack)) {
+        CompoundTag nbtCompound = customData.copyTag();
+        Tag element = nbtCompound.get(POLY_MC_ID);
+        if (!(element instanceof CompoundTag polymerStack)) {
             return Optional.empty();
         }
         if (polymerStack.contains("id")) {
@@ -118,18 +117,18 @@ public class ClientPolymerItemUtils {
     }
 
     public static Optional<String> getEivStackId(ItemStack itemStack) {
-        NbtComponent customData = getCustomData(itemStack);
+        CustomData customData = getCustomData(itemStack);
         if (customData == null) {
             return Optional.empty();
         }
-        NbtCompound nbtCompound = customData.copyNbt();
+        CompoundTag nbtCompound = customData.copyTag();
         if (!nbtCompound.contains(REI_ITEM_ID)) {
             return Optional.empty();
         }
         return nbtCompound.getString(REI_ITEM_ID);
     }
 
-    public static NbtComponent getCustomData(ItemStack itemStack) {
-        return itemStack.get(DataComponentTypes.CUSTOM_DATA);
+    public static CustomData getCustomData(ItemStack itemStack) {
+        return itemStack.get(DataComponents.CUSTOM_DATA);
     }
 }

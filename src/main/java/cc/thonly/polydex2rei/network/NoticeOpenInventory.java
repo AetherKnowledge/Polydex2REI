@@ -2,29 +2,29 @@ package cc.thonly.polydex2rei.network;
 
 import cc.thonly.polydex2rei.Polydex2REI;
 import lombok.extern.slf4j.Slf4j;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 @Slf4j
-public record NoticeOpenInventory() implements CustomPayload {
+public record NoticeOpenInventory() implements CustomPacketPayload {
     public static final Identifier ID = Polydex2REI.id("open_inventory");
-    public static final Id<NoticeOpenInventory> PACKET_ID = new Id<>(ID);
+    public static final Type<NoticeOpenInventory> PACKET_ID = new Type<>(ID);
 
-    public static final PacketCodec<RegistryByteBuf, NoticeOpenInventory> CODEC = PacketCodec.of(
+    public static final StreamCodec<RegistryFriendlyByteBuf, NoticeOpenInventory> CODEC = StreamCodec.ofMember(
             NoticeOpenInventory::write,
             NoticeOpenInventory::read);
 
-    private static NoticeOpenInventory read(RegistryByteBuf buf) {
+    private static NoticeOpenInventory read(RegistryFriendlyByteBuf buf) {
         return new NoticeOpenInventory();
     }
 
-    private void write(RegistryByteBuf buf) {
+    private void write(RegistryFriendlyByteBuf buf) {
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return PACKET_ID;
     }
 }

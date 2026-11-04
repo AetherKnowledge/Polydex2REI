@@ -1,25 +1,26 @@
 package cc.thonly.polydex2rei.plugin;
 
 import cc.thonly.polydex2rei.Polydex2REI;
+import cc.thonly.polydex2rei.client.PolydexTabNavigation;
 import dev.architectury.utils.GameInstance;
 import eu.pb4.polymer.core.api.client.ClientPolymerItem;
-import eu.pb4.polymer.core.api.item.PolymerItemUtils;
 import eu.pb4.polymer.core.api.utils.PolymerSyncedObject;
 import me.shedaniel.rei.api.client.plugins.REIClientPlugin;
 import me.shedaniel.rei.api.client.registry.category.CategoryRegistry;
 import me.shedaniel.rei.api.client.registry.display.DisplayRegistry;
 import me.shedaniel.rei.api.client.registry.display.DynamicDisplayGenerator;
 import me.shedaniel.rei.api.client.registry.entry.EntryRegistry;
+import me.shedaniel.rei.api.client.registry.screen.ScreenRegistry;
 import me.shedaniel.rei.api.client.view.ViewSearchBuilder;
 import me.shedaniel.rei.api.common.category.CategoryIdentifier;
 import me.shedaniel.rei.api.common.display.Display;
 import me.shedaniel.rei.api.common.entry.EntryStack;
 import me.shedaniel.rei.api.common.entry.type.VanillaEntryTypes;
 import me.shedaniel.rei.api.common.registry.display.ServerDisplayRegistry;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import xyz.nucleoid.packettweaker.PacketContext;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 
 import java.util.List;
 import java.util.Optional;
@@ -35,6 +36,11 @@ public class Polydex2REIPlugin implements REIClientPlugin {
     }
 
     @Override
+    public void registerScreens(ScreenRegistry registry) {
+        registry.exclusionZones().register(AbstractContainerScreen.class, PolydexTabNavigation::getExclusionZones);
+    }
+
+    @Override
     public void registerDisplays(DisplayRegistry registry) {
 //        registry.beginFiller(Object.class).fill(o -> new Polydex2REIDisplay());
     }
@@ -47,7 +53,7 @@ public class Polydex2REIPlugin implements REIClientPlugin {
                 return false;
             }
             Item item = itemStack.getItem();
-            return PolymerSyncedObject.getSyncedObject(Registries.ITEM, item) != null;
+            return PolymerSyncedObject.getSyncedObject(BuiltInRegistries.ITEM, item) != null;
         });
 
         for (ClientPolymerItem clientPolymerItem : ClientPolymerItem.REGISTRY) {
@@ -55,7 +61,7 @@ public class Polydex2REIPlugin implements REIClientPlugin {
             if (item == null) {
                 continue;
             }
-            ItemStack clientItemStack = PolymerItemUtils.getClientItemStack(item.getDefaultStack(), PacketContext.get());
+            ItemStack clientItemStack = clientPolymerItem.visualStack().copy();
             EntryStack<ItemStack> entryStack = EntryStack.of(VanillaEntryTypes.ITEM, clientItemStack);
             registry.addEntry(entryStack);
         }

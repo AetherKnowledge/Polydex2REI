@@ -2,8 +2,9 @@
   "required": true,
   "package": "cc.thonly.polydex2rei.mixin",
   "plugin": "cc.thonly.polydex2rei.Polydex2REIMixinPlugin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_25",
   "mixins": [
+    "DefaultBlastingDisplayMixin",
     "ExampleMixin",
     "RoughlyEnoughItemsNetworkMixin",
     "ServerDisplayRegistryImplMixin",
@@ -16,14 +17,9 @@
     "requireAnnotations": true
   },
   "client": [
-    "ReiCompatibilityMixin",
     "AbstractDisplayViewingScreenMixin",
     "ClientHelperImplMixin",
-    "CompositeDisplayViewingScreenMixin",
-    "DefaultDisplayViewingScreenMixin",
     "DisplayedEntryWidgetMixin",
-    "EntryWidgetMixin",
-    "ItemEntryDefinitionMixin",
-    "ScreenOverlayImplMixin"
+    "ItemEntryDefinitionMixin"
   ]
 }

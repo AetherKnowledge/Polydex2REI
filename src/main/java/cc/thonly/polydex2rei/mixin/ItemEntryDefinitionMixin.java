@@ -7,8 +7,8 @@ import me.shedaniel.rei.api.common.entry.EntryStack;
 import me.shedaniel.rei.api.common.entry.comparison.ComparisonContext;
 import me.shedaniel.rei.api.common.entry.comparison.ItemComparatorRegistry;
 import me.shedaniel.rei.plugin.client.entry.ItemEntryDefinition;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
@@ -21,19 +21,25 @@ import java.util.Optional;
 @Pseudo
 public class ItemEntryDefinitionMixin {
     @Inject(
-            method = "equals(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ItemStack;Lme/shedaniel/rei/api/common/entry/comparison/ComparisonContext;)Z",
+            method = "equals(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/item/ItemStack;Lme/shedaniel/rei/api/common/entry/comparison/ComparisonContext;)Z",
             at = @At("HEAD"),
             cancellable = true
     )
     public void modifyEquals(ItemStack o1, ItemStack o2, ComparisonContext context, CallbackInfoReturnable<Boolean> cir) {
-        if (ItemStack.areItemsAndComponentsEqual(o1, o2)) {
+        // Different server items can share the same vanilla client carrier.
+        if ((ClientPolymerItemUtils.isPolyItem(o1) || ClientPolymerItemUtils.isPolyItem(o2))
+                && !ClientPolymerItemUtils.getRealItemId(o1).equals(ClientPolymerItemUtils.getRealItemId(o2))) {
+            cir.setReturnValue(false);
+            return;
+        }
+        if (ItemStack.isSameItemSameComponents(o1, o2)) {
             cir.setReturnValue(true);
             cir.cancel();
         }
     }
 
     @Inject(
-            method = "hash(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/item/ItemStack;Lme/shedaniel/rei/api/common/entry/comparison/ComparisonContext;)J",
+            method = "hash(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/world/item/ItemStack;Lme/shedaniel/rei/api/common/entry/comparison/ComparisonContext;)J",
             at = @At("HEAD"),
             cancellable = true
     )
@@ -50,13 +56,13 @@ public class ItemEntryDefinitionMixin {
         }
     }
 
-    @Inject(method = "wildcard(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/item/ItemStack;)Lnet/minecraft/item/ItemStack;",
+    @Inject(method = "wildcard(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/item/ItemStack;",
             at = @At("HEAD"),
             cancellable = true)
     public void wildcard(EntryStack<ItemStack> entry, ItemStack value, CallbackInfoReturnable<ItemStack> cir) {
         if (ClientPolymerItemUtils.isPolyItem(value)) {
             String realItemId = ClientPolymerItemUtils.getRealItemId(value);
-            ClientPolymerItem item = ClientPolymerItem.REGISTRY.get(Identifier.of(realItemId));
+            ClientPolymerItem item = ClientPolymerItem.REGISTRY.get(Identifier.parse(realItemId));
 
             if (item != null) {
                 cir.setReturnValue(item.visualStack().copy());
@@ -66,7 +72,7 @@ public class ItemEntryDefinitionMixin {
         }
     }
 
-    @Inject(method = "cheatsAs(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/item/ItemStack;)Lnet/minecraft/item/ItemStack;",
+    @Inject(method = "cheatsAs(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/item/ItemStack;",
             at = @At("RETURN"),
             cancellable = true
     )
@@ -77,7 +83,7 @@ public class ItemEntryDefinitionMixin {
             return;
         }
         String strId = itemModelId.get();
-        Identifier itemId = Identifier.of(strId);
+        Identifier itemId = Identifier.parse(strId);
         ClientPolymerItem clientPolymerItem = ClientPolymerItem.REGISTRY.get(itemId);
         if (clientPolymerItem != null) {
             ItemStack copy = clientPolymerItem.visualStack().copyWithCount(value.getCount());
@@ -85,14 +91,14 @@ public class ItemEntryDefinitionMixin {
         }
     }
 
-    @Inject(method = "getIdentifier(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/item/ItemStack;)Lnet/minecraft/util/Identifier;",
+    @Inject(method = "getIdentifier(Lme/shedaniel/rei/api/common/entry/EntryStack;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/resources/Identifier;",
             at = @At("HEAD"),
             cancellable = true
     )
     public void getIdentifier(EntryStack<ItemStack> entry, ItemStack value, CallbackInfoReturnable<Identifier> cir) {
         if (ClientPolymerItemUtils.isPolyItem(value)) {
             String realItemId = ClientPolymerItemUtils.getRealItemId(value);
-            cir.setReturnValue(Identifier.of(realItemId));
+            cir.setReturnValue(Identifier.parse(realItemId));
             cir.cancel();
         }
     }
