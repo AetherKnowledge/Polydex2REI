@@ -9,6 +9,9 @@ import cc.thonly.polydex2rei.plugin.Polydex2REICategory;
 import cc.thonly.polydex2rei.plugin.Polydex2REIDisplay;
 import cc.thonly.polydex2rei.util.ClientPolymerItemUtils;
 import cc.thonly.polydex2rei.client.PolydexTabNavigation;
+import cc.thonly.polydex2rei.client.CompactCategoryTabsChecks;
+import dev.architectury.event.CompoundEventResult;
+import dev.architectury.event.events.client.ClientGuiEvent;
 import eu.pb4.polydex.impl.PolydexImpl;
 import eu.pb4.polydex.api.v1.recipe.PolydexPageUtils;
 import io.netty.buffer.Unpooled;
@@ -215,6 +218,7 @@ public class MigrationGameTest implements FabricClientGameTest {
                 });
             }
             Polydex2REI.LOGGER.info("Verified recipe and usage identity for {} PolyFactory entries", factoryEntries.size());
+            context.runOnClient(client -> CompactCategoryTabsChecks.verify());
             verifyPolydexLoading(context, world.getServer());
             verifyTabNavigation(context, world.getServer(), Action.LEFT);
             verifyTabNavigation(context, world.getServer(), Action.RIGHT);
@@ -338,6 +342,7 @@ public class MigrationGameTest implements FabricClientGameTest {
     }
 
     private static void verifyTabNavigation(ClientGameTestContext context, TestServerContext serverContext, Action action) {
+        String itemId = action == Action.LEFT ? "polyfactory:steel_ingot" : "polyfactory:steel_gear";
         boolean creative = action == Action.RIGHT;
         serverContext.runOnServer(server -> server.getPlayerList().getPlayers().getFirst()
                 .setGameMode(creative ? GameType.CREATIVE : GameType.SURVIVAL));
@@ -352,7 +357,7 @@ public class MigrationGameTest implements FabricClientGameTest {
         var categories = context.computeOnClient(client -> {
             var item = EntryRegistry.getInstance().getEntryStacks()
                     .filter(entry -> entry.getValue() instanceof ItemStack stack
-                            && ClientPolymerItemUtils.getRealItemId(stack).equals("polyfactory:steel_gear"))
+                            && ClientPolymerItemUtils.getRealItemId(stack).equals(itemId))
                     .findFirst().orElseThrow();
             var builder = ViewSearchBuilder.builder().setPreferredOpenedCategory(Polydex2REIPlugin.CATEGORY);
             if (action == Action.LEFT) builder.addRecipesFor(item); else builder.addUsagesFor(item);
@@ -360,6 +365,12 @@ public class MigrationGameTest implements FabricClientGameTest {
             require(builder.open(), "Polydex view failed to open");
             return ids;
         });
+        var switchingTabs = new java.util.concurrent.atomic.AtomicBoolean();
+        var closedToGameplay = new java.util.concurrent.atomic.AtomicBoolean();
+        context.runOnClient(client -> ClientGuiEvent.SET_SCREEN.register(screen -> {
+            if (switchingTabs.get() && screen == null) closedToGameplay.set(true);
+            return CompoundEventResult.pass();
+        }));
         for (int cycle = 0; cycle < 3; cycle++) {
             context.waitFor(client -> client.gui.screen() instanceof AbstractContainerScreen<?>
                     && client.player.containerMenu != client.player.inventoryMenu);
@@ -386,14 +397,21 @@ public class MigrationGameTest implements FabricClientGameTest {
                     (screen, graphics, mouseX, mouseY, delta) -> rendered.set(true)));
             context.waitFor(client -> rendered.get());
             var bounds = context.computeOnClient(client -> ScreenRegistry.getInstance().getScreenBounds(client.gui.screen()));
-            var tabBounds = bounds.y >= 28
-                    ? new me.shedaniel.math.Rectangle(bounds.x, bounds.y - 28, bounds.width, 28)
-                    : new me.shedaniel.math.Rectangle(4, Math.max(18, bounds.y), Math.max(34, bounds.x - 8), 28);
             int tabSize = context.computeOnClient(client -> ConfigObject.getInstance().isUsingCompactTabs() ? 24 : 28);
             int craftingIndex = categories.indexOf(BuiltinPlugin.CRAFTING);
             require(craftingIndex >= 0 && categories.size() <= 5, "Crafting tab unavailable for navigation test");
-            double x = tabBounds.getCenterX() - categories.size() * tabSize / 2.0 + craftingIndex * tabSize + tabSize / 2.0;
-            double y = tabBounds.y + 14;
+            var tabBounds = context.computeOnClient(client -> PolydexTabNavigation.getExclusionZones(client.gui.screen()).getFirst());
+            double x;
+            double y;
+            if (bounds.y < 28) {
+                require(tabBounds.width == 32 && tabBounds.getMaxX() <= bounds.x && tabBounds.y >= 0,
+                        "Compact tabs should form a narrow strip beside the menu");
+                x = tabBounds.getCenterX();
+                y = tabBounds.y + 4 + craftingIndex * 28 + 12;
+            } else {
+                x = bounds.getCenterX() - categories.size() * tabSize / 2.0 + craftingIndex * tabSize + tabSize / 2.0;
+                y = bounds.y - 14;
+            }
             moveCursorInGui(context, x, y);
             if (cycle == 1 && action == Action.LEFT) {
                 // Cursor at the tab edge makes its tooltip overlap the adjacent tab.
@@ -403,17 +421,18 @@ public class MigrationGameTest implements FabricClientGameTest {
             }
             // Dispatch through Fabric without moving the desktop cursor or depending on native event polling.
             context.runOnClient(client -> {
-                client.mouseHandler.resyncMousePosition();
-                double cursorX = client.mouseHandler.xpos();
-                double cursorY = client.mouseHandler.ypos();
                 var screen = client.gui.screen();
                 require(!PolydexTabNavigation.getExclusionZones(screen).isEmpty(), "Polydex lost its tab navigation");
-                require(!ScreenMouseEvents.allowMouseClick(screen).invoker().allowMouseClick(screen,
-                                new MouseButtonEvent(x, y, new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0))),
-                        "Crafting tab click was not consumed");
-                require(Math.abs(client.mouseHandler.xpos() - cursorX) < 1
-                                && Math.abs(client.mouseHandler.ypos() - cursorY) < 1,
-                        "Switching from Polydex moved the cursor");
+                switchingTabs.set(true);
+                try {
+                    require(!ScreenMouseEvents.allowMouseClick(screen).invoker().allowMouseClick(screen,
+                                    new MouseButtonEvent(x, y, new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0))),
+                            "Crafting tab click was not consumed");
+                    // Closing to gameplay grabs and recenters the mouse, even for one screen transition.
+                    require(!closedToGameplay.get(), "Switching tabs briefly closed to gameplay");
+                } finally {
+                    switchingTabs.set(false);
+                }
             });
             context.waitForScreen(AbstractDisplayViewingScreen.class);
             context.waitFor(client -> client.player.containerMenu == client.player.inventoryMenu);

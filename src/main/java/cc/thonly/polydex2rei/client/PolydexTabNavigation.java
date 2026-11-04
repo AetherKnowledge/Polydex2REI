@@ -8,6 +8,7 @@ import cc.thonly.polydex2rei.plugin.Polydex2REIPlugin;
 import dev.architectury.utils.value.IntValue;
 import me.shedaniel.math.Rectangle;
 import me.shedaniel.rei.api.client.registry.display.DisplayCategory;
+import me.shedaniel.rei.api.client.gui.widgets.Widget;
 import me.shedaniel.rei.api.client.REIRuntime;
 import me.shedaniel.rei.api.client.registry.screen.ScreenRegistry;
 import me.shedaniel.rei.api.common.category.CategoryIdentifier;
@@ -136,7 +137,7 @@ public final class PolydexTabNavigation {
         Session current = session;
         if (current != null && current.menuOpen && current.screen == screen) {
             // Render with the container, before REI's final tooltip pass.
-            for (var widget : current.tabs.widgets()) widget.extractRenderState(graphics, mouseX, mouseY, delta);
+            for (var widget : current.widgets) widget.extractRenderState(graphics, mouseX, mouseY, delta);
         }
     }
 
@@ -146,36 +147,42 @@ public final class PolydexTabNavigation {
             return;
         }
         current.screen = screen;
-        TabContainerWidget tabs = new TabContainerWidget();
-        current.tabs = tabs;
         Rectangle container = ScreenRegistry.getInstance().getScreenBounds(screen);
-        // Short windows have no space above a full-height container. Keep tabs beside its header instead.
-        Rectangle bounds = container.y >= 28
-                ? new Rectangle(container.x, container.y - 28, container.width, 28)
-                : new Rectangle(4, Math.max(18, container.y), Math.max(34, container.x - 8), 28);
         List<DisplayCategory<?>> categories = new ArrayList<>(current.categories.keySet());
         int selected = 0;
         for (int i = 0; i < categories.size(); i++) {
             if (categories.get(i).getCategoryIdentifier().equals(Polydex2REIPlugin.CATEGORY)) selected = i;
         }
         final int selectedIndex = selected;
-        IntValue page = new IntValue() {
-            private int value = -1;
-            @Override public void accept(int value) { this.value = value; }
-            @Override public int getAsInt() { return value; }
-        };
-        IntValue selection = new IntValue() {
-            @Override public void accept(int index) { returnToCategory(current, categories.get(index).getCategoryIdentifier()); }
-            @Override public int getAsInt() { return selectedIndex; }
-        };
-        tabs.init(bounds, bounds, categories, page, selection, () -> {});
-        tabs.updateScroll(categories, selectedIndex, 0);
-        int exclusionTop = Math.max(0, bounds.y - 18);
-        current.tabBounds = new Rectangle(bounds.x, exclusionTop, bounds.width, bounds.getMaxY() - exclusionTop + 4);
+        Rectangle bounds;
+        if (container.y < 28) {
+            CompactCategoryTabs tabs = new CompactCategoryTabs(container, screen.height, categories, selectedIndex,
+                    index -> returnToCategory(current, categories.get(index).getCategoryIdentifier()));
+            bounds = tabs.getBounds();
+            current.widgets = List.of(tabs);
+            current.tabBounds = new Rectangle(bounds);
+        } else {
+            TabContainerWidget tabs = new TabContainerWidget();
+            bounds = new Rectangle(container.x, container.y - 28, container.width, 28);
+            IntValue page = new IntValue() {
+                private int value = -1;
+                @Override public void accept(int value) { this.value = value; }
+                @Override public int getAsInt() { return value; }
+            };
+            IntValue selection = new IntValue() {
+                @Override public void accept(int index) { returnToCategory(current, categories.get(index).getCategoryIdentifier()); }
+                @Override public int getAsInt() { return selectedIndex; }
+            };
+            tabs.init(bounds, bounds, categories, page, selection, () -> {});
+            tabs.updateScroll(categories, selectedIndex, 0);
+            int exclusionTop = Math.max(0, bounds.y - 18);
+            current.tabBounds = new Rectangle(bounds.x, exclusionTop, bounds.width, bounds.getMaxY() - exclusionTop + 4);
+            current.widgets = tabs.widgets();
+        }
         REIRuntime.getInstance().getOverlay().ifPresent(overlay -> overlay.queueReloadOverlay());
         ScreenMouseEvents.allowMouseClick(screen).register((ignored, event) -> {
             if (session == current && current.menuOpen && current.screen == screen) {
-                for (var widget : tabs.widgets()) {
+                for (var widget : current.widgets) {
                     if (widget.mouseClicked(event, false)) return false;
                 }
                 return !bounds.contains(event.x(), event.y());
@@ -184,7 +191,7 @@ public final class PolydexTabNavigation {
         });
         ScreenMouseEvents.allowMouseScroll(screen).register((ignored, x, y, horizontal, vertical) -> {
             if (session == current && current.menuOpen && current.screen == screen) {
-                for (var widget : tabs.widgets()) {
+                for (var widget : current.widgets) {
                     if (widget.mouseScrolled(x, y, horizontal, vertical)) return false;
                 }
                 return !bounds.contains(x, y);
@@ -226,7 +233,7 @@ public final class PolydexTabNavigation {
         private int retryTicks;
         private Component status = Component.translatable("polydex2rei.status.opening");
         private AbstractContainerScreen<?> screen;
-        private TabContainerWidget tabs;
+        private List<Widget> widgets;
         private Rectangle tabBounds;
 
         private Session(AbstractDisplayViewingScreen source, Map<DisplayCategory<?>, List<DisplaySpec>> categories,
