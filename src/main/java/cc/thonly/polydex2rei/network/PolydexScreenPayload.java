@@ -8,6 +8,8 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 public record PolydexScreenPayload(int containerId, boolean open, StackActionPayload query) implements CustomPacketPayload {
+    public static final int UNAVAILABLE = -1;
+    public static final int LOADING = -2;
     public static final Identifier ID = Polydex2REI.id("polydex_screen");
     public static final Type<PolydexScreenPayload> PACKET_ID = new Type<>(ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, PolydexScreenPayload> CODEC = StreamCodec.composite(

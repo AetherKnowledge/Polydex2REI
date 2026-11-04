@@ -22,6 +22,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -62,6 +63,13 @@ public final class PolydexTabNavigation {
                 attach(screen);
             }
         } else {
+            if (payload.containerId() < 0 && current.pending) {
+                current.pending = false;
+                boolean loading = payload.containerId() == PolydexScreenPayload.LOADING;
+                current.retryTicks = loading ? 20 : 0;
+                current.status = Component.translatable(loading ? "polydex2rei.status.loading" : "polydex2rei.status.unavailable");
+                return;
+            }
             if (current.containerId != payload.containerId()) return;
             session = null;
             if (payload.containerId() < 0) return;
@@ -92,6 +100,24 @@ public final class PolydexTabNavigation {
         if (session != null && session.returning && !(client.gui.screen() instanceof AbstractDisplayViewingScreen)) {
             reset();
         }
+        Session current = session;
+        if (current != null && current.retryTicks > 0) {
+            if (client.gui.screen() != current.source
+                    || !current.source.getCurrentCategoryId().equals(Polydex2REIPlugin.CATEGORY)) {
+                reset();
+            } else if (--current.retryTicks == 0) {
+                current.pending = true;
+                Polydex2REI.sendQueryPolydexPagePacket(current.query.action(), current.query.id());
+            }
+        }
+    }
+
+    public static Component getStatus(Polydex2REIDisplay display) {
+        Session current = session;
+        if (current != null && current.query.action() == display.action() && current.query.id().equals(display.itemId())) {
+            return current.status;
+        }
+        return Component.translatable("polydex2rei.status.opening");
     }
 
     public static void reset() {
@@ -197,6 +223,8 @@ public final class PolydexTabNavigation {
         private boolean menuOpen;
         private boolean returning;
         private int containerId = -1;
+        private int retryTicks;
+        private Component status = Component.translatable("polydex2rei.status.opening");
         private AbstractContainerScreen<?> screen;
         private TabContainerWidget tabs;
         private Rectangle tabBounds;

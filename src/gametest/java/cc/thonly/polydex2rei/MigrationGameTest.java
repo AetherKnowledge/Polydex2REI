@@ -8,6 +8,7 @@ import cc.thonly.polydex2rei.plugin.Polydex2REIPlugin;
 import cc.thonly.polydex2rei.plugin.Polydex2REICategory;
 import cc.thonly.polydex2rei.plugin.Polydex2REIDisplay;
 import cc.thonly.polydex2rei.util.ClientPolymerItemUtils;
+import cc.thonly.polydex2rei.client.PolydexTabNavigation;
 import eu.pb4.polydex.impl.PolydexImpl;
 import eu.pb4.polydex.api.v1.recipe.PolydexPageUtils;
 import io.netty.buffer.Unpooled;
@@ -28,6 +29,9 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
@@ -211,6 +215,7 @@ public class MigrationGameTest implements FabricClientGameTest {
                 });
             }
             Polydex2REI.LOGGER.info("Verified recipe and usage identity for {} PolyFactory entries", factoryEntries.size());
+            verifyPolydexLoading(context, world.getServer());
             verifyTabNavigation(context, world.getServer(), Action.LEFT);
             verifyTabNavigation(context, world.getServer(), Action.RIGHT);
             world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().getFirst().openMenu(
@@ -274,6 +279,64 @@ public class MigrationGameTest implements FabricClientGameTest {
                 .anyMatch(entry -> entry.getValue() instanceof ItemStack item && item.is(Items.DIAMOND_CHESTPLATE));
     }
 
+    private static void verifyPolydexLoading(ClientGameTestContext context, TestServerContext serverContext) {
+        var query = new Polydex2REIDisplay(Action.LEFT, "polyfactory:steel_gear");
+        for (boolean cancel : new boolean[]{false, true}) {
+            serverContext.runOnServer(server -> setPolydexReady(false));
+            try {
+                context.runOnClient(client -> {
+                    client.gui.setScreen(new InventoryScreen(client.player));
+                    var item = EntryRegistry.getInstance().getEntryStacks()
+                            .filter(entry -> entry.getValue() instanceof ItemStack stack
+                                    && ClientPolymerItemUtils.getRealItemId(stack).equals(query.itemId()))
+                            .findFirst().orElseThrow();
+                    require(ViewSearchBuilder.builder().addRecipesFor(item)
+                            .setPreferredOpenedCategory(Polydex2REIPlugin.CATEGORY).open(), "Loading view failed to open");
+                });
+                context.waitFor(client -> PolydexTabNavigation.getStatus(query)
+                        .equals(Component.translatable("polydex2rei.status.loading")));
+                context.waitTicks(45);
+                context.runOnClient(client -> require(client.gui.screen() instanceof AbstractDisplayViewingScreen
+                                && client.player.containerMenu == client.player.inventoryMenu,
+                        "Polydex opened before its recipe index was ready"));
+                if (cancel) {
+                    context.runOnClient(client -> {
+                        var screen = (AbstractDisplayViewingScreen) client.gui.screen();
+                        while (!screen.getCurrentCategoryId().equals(BuiltinPlugin.CRAFTING)) screen.nextCategory();
+                    });
+                    context.waitTicks(25);
+                } else {
+                    Polydex2REI.LOGGER.info("Polydex loading screenshot: {}", context.takeScreenshot("polydex-loading"));
+                }
+            } finally {
+                serverContext.runOnServer(server -> setPolydexReady(true));
+            }
+            if (cancel) {
+                context.waitTicks(45);
+                context.runOnClient(client -> require(client.gui.screen() instanceof AbstractDisplayViewingScreen screen
+                                && screen.getCurrentCategoryId().equals(BuiltinPlugin.CRAFTING)
+                                && client.player.containerMenu == client.player.inventoryMenu,
+                        "Cancelled Polydex request reopened after loading"));
+            } else {
+                context.waitFor(client -> client.gui.screen() instanceof AbstractContainerScreen<?>
+                        && client.player.containerMenu != client.player.inventoryMenu);
+                context.runOnClient(client -> client.player.closeContainer());
+            }
+            context.setScreen(() -> null);
+        }
+    }
+
+    private static void setPolydexReady(boolean ready) {
+        // Deterministically exercise a long index rebuild without waiting minutes for a large pack.
+        try {
+            var field = PolydexImpl.class.getDeclaredField("isReady");
+            field.setAccessible(true);
+            field.setBoolean(null, ready);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
     private static void verifyTabNavigation(ClientGameTestContext context, TestServerContext serverContext, Action action) {
         boolean creative = action == Action.RIGHT;
         serverContext.runOnServer(server -> server.getPlayerList().getPlayers().getFirst()
@@ -332,26 +395,30 @@ public class MigrationGameTest implements FabricClientGameTest {
             double x = tabBounds.getCenterX() - categories.size() * tabSize / 2.0 + craftingIndex * tabSize + tabSize / 2.0;
             double y = tabBounds.y + 14;
             moveCursorInGui(context, x, y);
-            var cursor = context.computeOnClient(client -> new double[]{client.mouseHandler.xpos(), client.mouseHandler.ypos()});
             if (cycle == 1 && action == Action.LEFT) {
                 // Cursor at the tab edge makes its tooltip overlap the adjacent tab.
                 moveCursorInGui(context, x + tabSize / 2.0 - 2, y);
                 Polydex2REI.LOGGER.info("Polydex tab tooltip screenshot: {}", context.takeScreenshot("polydex-tab-tooltip"));
                 moveCursorInGui(context, x, y);
             }
-            // setScreen resyncs from SDL, while TestInput only changes Minecraft's simulated position.
-            context.runOnClient(client -> org.lwjgl.sdl.SDLMouse.SDL_WarpMouseInWindow(
-                    client.getWindow().handle(), (float) cursor[0], (float) cursor[1]));
-            context.getInput().setCursorPos(cursor[0], cursor[1]);
-            context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+            // Dispatch through Fabric without moving the desktop cursor or depending on native event polling.
+            context.runOnClient(client -> {
+                client.mouseHandler.resyncMousePosition();
+                double cursorX = client.mouseHandler.xpos();
+                double cursorY = client.mouseHandler.ypos();
+                var screen = client.gui.screen();
+                require(!PolydexTabNavigation.getExclusionZones(screen).isEmpty(), "Polydex lost its tab navigation");
+                require(!ScreenMouseEvents.allowMouseClick(screen).invoker().allowMouseClick(screen,
+                                new MouseButtonEvent(x, y, new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0))),
+                        "Crafting tab click was not consumed");
+                require(Math.abs(client.mouseHandler.xpos() - cursorX) < 1
+                                && Math.abs(client.mouseHandler.ypos() - cursorY) < 1,
+                        "Switching from Polydex moved the cursor");
+            });
             context.waitForScreen(AbstractDisplayViewingScreen.class);
             context.waitFor(client -> client.player.containerMenu == client.player.inventoryMenu);
             context.waitTicks(5);
             context.runOnClient(client -> {
-                require(Math.abs(client.mouseHandler.xpos() - cursor[0]) < 1
-                                && Math.abs(client.mouseHandler.ypos() - cursor[1]) < 1,
-                        "Switching from Polydex moved cursor from " + java.util.Arrays.toString(cursor)
-                                + " to " + client.mouseHandler.xpos() + ", " + client.mouseHandler.ypos());
                 require(client.gui.screen() instanceof DisplayScreen display
                             && display.getCurrentCategoryId().equals(BuiltinPlugin.CRAFTING),
                         "Tab click failed to restore the native crafting view");

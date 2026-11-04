@@ -46,9 +46,17 @@ public class Polydex2REI
 
         ServerPlayNetworking.registerGlobalReceiver(StackActionPayload.PACKET_ID, (payload, context) -> {
             ServerPlayer player = context.player();
+            if (!PolydexPageUtils.isReady()) {
+                rejectPolydexQuery(player, payload);
+                return;
+            }
             Action action = payload.action();
             String stringId = payload.id();
-            Identifier id = Identifier.parse(stringId);
+            Identifier id = Identifier.tryParse(stringId);
+            if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) {
+                rejectPolydexQuery(player, payload);
+                return;
+            }
             Item item = BuiltInRegistries.ITEM.getValue(id);
             if (item == Items.AIR) {
                 rejectPolydexQuery(player, payload);
@@ -75,11 +83,16 @@ public class Polydex2REI
 
     private static void rejectPolydexQuery(ServerPlayer player, StackActionPayload query) {
         if (ServerPlayNetworking.canSend(player, PolydexScreenPayload.ID)) {
-            ServerPlayNetworking.send(player, new PolydexScreenPayload(-1, false, query));
+            int status = PolydexPageUtils.isReady() ? PolydexScreenPayload.UNAVAILABLE : PolydexScreenPayload.LOADING;
+            ServerPlayNetworking.send(player, new PolydexScreenPayload(status, false, query));
         }
     }
 
     private static void openPolydex(ServerPlayer player, PolydexEntry entry, StackActionPayload query) {
+        if (!PolydexPageUtils.isReady()) {
+            rejectPolydexQuery(player, query);
+            return;
+        }
         int[] openedContainer = {-1};
         Runnable back = () -> {
             player.closeContainer();
